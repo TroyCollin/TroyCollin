@@ -1,0 +1,1161 @@
+#!/bin/bash
+
+
+## This is the Centos7 System Hardening Script  1.5
+## April 17, 2017
+
+## This script must be run as a superuser/root
+
+## This script modifies the system in order to meet
+## a number of (PCI-DSS) requirements
+
+# Version changes :
+#1.3
+## Added backups of files beeting settings via sed
+#1.5
+## Added check to see if application is installed already before tryin to install
+#1.6 Added checking for if string was already added to config file to eliminate duplicates
+#1.7 fixed error in script and cleaned it up a bit more with notes
+#1.9 added all output to logfile with date extention.
+
+#By Troy Collin
+
+
+today=`date '+%b-%d-%y'`;
+logdate1=$logdate
+echo ""
+echo ""
+echo "######################## All output from script will be saved /var/log/Hardening/Hardening_$today.log ###################"
+echo ""
+mkdir /var/log/Hardening
+(
+echo " `date` : part 1 - start "
+
+
+
+#
+echo " by Troy Collin"
+echo
+echo
+sleep .10 # Waits 0.10 second.
+
+## A.1.0 update login banner (/etc/issue)
+##
+#
+echo "$(tput setab 2)update login banner (/etc/issue)$(tput sgr 0)"
+mv /etc/issue /etc/issue.backup
+touch /etc/issue
+echo -e "\n\nWARNING:\n\nThis computer system is restricted to authorized users only.\nIf you require access please contact the helpdesk or Server Team\n\n" > /etc/issue
+chown root:root /etc/issue
+chmod 644 /etc/issue
+
+
+## A.1.1 Secure /tmp and the mounting of /tmp
+echo "$(tput setab 2) Secure /tmp and the mounting of /tmp $(tput sgr 0)"
+systemctl unmask tmp.mount
+systemctl enable tmp.mount
+sed -ci.backup -e 's/Options=mode=1777,strictatime/Options=mode=1777,strictatime,noexec,nodev,nosuid/g' /etc/systemd/system/local-fs.target.wants/tmp.mount
+
+
+### A.1.2 Secure /dev/shm
+## Since the /dev/shm filesystem is not intened of support devices, set this option to ensure the users can not attempt to do so.
+#
+echo "$(tput setab 2)Secure /dev/shm$(tput sgr 0)"
+File=/etc/fstab
+if grep -q "tmpfs /dev/shm tmpfs defaults,nodev,nosuid,noexec 0 0" "$File"; ##note the space after the string you are searching for
+then
+echo -e "\e[1;32mChange already done.. skipping\e[0m"
+else
+echo -e "\e[1;33mAdding config to $File...\e[0m"
+echo 'tmpfs /dev/shm tmpfs defaults,nodev,nosuid,noexec 0 0 ' >> $File
+fi
+echo -e "\e[33mVerify SHM mount settings"
+mount | grep /dev/shm
+echo -e "\e[0m"
+
+
+### A.1.3 Secure /dev/shm
+## Since the /dev/shm filesystem is not intened of support devices, set this option to ensure the users can not attempt to do so.
+#
+echo "$(tput setab 2)checking secrity of GPGchecks for yum repos$(tput sgr 0)"
+echo -e "\e[33mVerify that all instance of gpgcheck is set to 1"
+grep ^gpgcheck /etc/yum.repos.d/*
+echo -e "\e[0m"
+sleep 5
+
+### A.1.4 Secure /dev/shm
+## n order to prevent users to reboot the server once they have physical access to keyboard
+## or via a Remote Console Application or a virtualized console
+#Disable Ctrl+Alt+Del
+echo "$(tput setab 2)Disable Ctrl+Alt+Del$(tput sgr 0)"
+systemctl mask ctrl-alt-del.target
+
+
+## A.2.1 Update system-auth Password Hardening
+##
+## Adding rules:        Uppercase characters required for password
+##                      PAM configuration minimum password length
+##                      Digits required for password
+##                      Lowercase characters required for password
+##                      Special characters required for password
+#
+echo "$(tput setab 2)Update system-auth Password Hardening$(tput sgr 0)"
+sed -ci.backup -e 's/\(password[[:space:]]*requisite[[:space:]]*pam_cracklib.so.*\)/\1 ucredit=-1 minlen=14 C lcredit=-1 ocredit=-1 dcredit=-1/' /etc/pam.d/system-auth
+sed -ci.backup -e '/\(auth[[:space:]]*required[[:space:]]*pam_deny.so.*\)/a auth\t    required\t  pam_tally.so onerr=fail no_magic_root/' /etc/pam.d/system-auth
+sed -ci.backup -e '/\(account[[:space:]]*required[[:space:]]*pam_permit.so.*\)/aaccount\t    required\t  pam_tally.so per_user deny=3 no_magic_root' /etc/pam.d/system-auth
+sed -ci.backup -e '/\(auth[[:space:]]*required[[:space:]]*pam_env.so.*\)/a Auth\t     required\t  d pam_faillock.so preauth audit silent deny=5 unlock_tim/' /etc/pam.d/system-auth
+
+
+
+
+
+## A.2.2 Update login.defs Password Hardening
+##
+## Adding rules:        Maximum password age
+##                      Minimum password lenght
+#
+echo "$(tput setab 2)Update login.defs Password Hardening$(tput sgr 0)"
+sed -ci.backup -e 's/\(PASS_MAX_DAYS[[:space:]]*\)\([0-99999]*\)/\190/' /etc/login.defs
+sed -ci.backup -e 's/\(PASS_MIN_LEN[[:space:]]*\)\([0-9]*\)/\17/' /etc/login.defs
+
+
+## A.2.8 Reset 'Maximum' password age
+## The following will reset existing users to the 90 day maximum password age
+#
+echo "$(tput setab 2)Reset 'Maximum' password age$(tput sgr 0)"
+for name in `cut -d: -f1 /etc/passwd`
+do
+  uid=`id -u $name`
+  if [ $uid -ne 65534 -a $uid -ge 500 ]
+  then
+    chage -M 90 $name
+  fi
+done
+
+
+## A.2.3 Update syslog.conf
+##
+#
+echo "$(tput setab 2)Place holder for syslog configuration...$(tput sgr 0)"
+
+
+
+## A.2.4 Update sshd_config
+##
+#
+echo "$(tput setab 2)Update sshd_config$(tput sgr 0)"
+sed -ci.backup -e 's/#\(PermitRootLogin\) .*/\1 no/' /etc/ssh/sshd_config
+#sed -ci.backup -e 's/#\(RhostsRSAAuthentication.*\)/\1/' /etc/ssh/sshd_config
+#sed -ci.backup -e '/\(RhostsRSAAuthentication.*\)/a RhostsAuthentication no' /etc/ssh/sshd_config
+sed -ci.backup -e '/\(#[[:space:]]*Protocol[[:space:]]*2,1\)/d' /etc/ssh/sshd_config
+sed -ci.backup -e 's/^Protocol .*$/Protocol 2/g' /etc/ssh/sshd_config
+sed -ci.backup -e 's/^LogLevel .*$/LogLevel INFO/g' /etc/ssh/sshd_config
+sed -ci.backup -e '/^#LogLevel* /s/^#//' /etc/ssh/sshd_config
+sed -ci.backup -e 's/X11Forwarding yes/X11Forwarding no/g' /etc/ssh/sshd_config
+sed -ci.backup -e '/MaxAuthTries*/d' /etc/ssh/sshd_config
+sed -ci.backup -e '$a\MaxAuthTries 4' /etc/ssh/sshd_config
+sed -ci.backup -e 's/IgnoreRhosts no/IgnoreRhosts yes/g' /etc/ssh/sshd_config
+sed -ci.backup -e '/^#IgnoreRhosts* /s/^#//' /etc/ssh/sshd_config
+sed -ci.backup -e 's/HostbasedAuthentication yes/HostbasedAuthentication no/g' /etc/ssh/sshd_config
+sed -ci.backup -e '/^#HostbasedAuthentication* /s/^#//' /etc/ssh/sshd_config
+sed -ci.backup -e 's/PermitEmptyPasswords yes/PermitEmptyPasswords no/g' /etc/ssh/sshd_config
+sed -ci.backup -e 's/PermitUserEnvironment yes/PermitUserEnvironment no/g' /etc/ssh/sshd_config
+sed -ci.backup -e 's/^Ciphers .*$/Ciphers aes128-ctr,aes192-ctr,aes256-ctr/g' /etc/ssh/sshd_config
+sed -ci.backup -e 's/^ClientAliveInterval .*$/ClientAliveInterval 1800/g' /etc/ssh/sshd_config
+sed -ci.backup -e 's/^ClientAliveCountMax .*$/ClientAliveCountMax 1/g' /etc/ssh/sshd_config
+sed -ci.backup -e '/MACs*/d' /etc/ssh/sshd_config
+sed -ci.backup -e '$a\MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256,umac-128@openssh.com' /etc/ssh/sshd_config
+sed -ci.backup -e 's/LoginGraceTime.*/LoginGraceTime 60/g' /etc/ssh/sshd_config
+sed -ci.backup -e '/^#LoginGraceTime* /s/^#//' /etc/ssh/sshd_config
+
+chown root:root /etc/ssh/sshd_config
+chmod 600 /etc/ssh/sshd_config
+
+
+## A.2.5 Update ssh_config
+##
+#\
+echo "$(tput setab 2)Update ssh_config$(tput sgr 0)"
+sed -ci.backup -e 's/\(#[[:space:]]*Protocol\) .*/\1 2/' /etc/ssh/ssh_config
+
+## A.2.6 Enforce GPG Check
+##
+#
+echo "$(tput setab 2)Enforce GPG Check$(tput sgr 0)"
+sed -i 's/gpgcheck=0/gpgcheck=1/g' /etc/yum.conf
+
+
+## A.2.7 Change permission on syslog.conf
+##
+#
+
+
+
+## A.2.9 Edit motd file
+##
+#
+echo "$(tput setab 2)Edit motd file$(tput sgr 0)"
+mv /etc/motd /etc/motd.backup
+touch /etc/motd
+echo -e "\n\nWARNING:\n\nThis computer system is restricted to authorized users.
+\nIndividuals using this system without authority, or in excess\nof their authority, are in violation of the acceptable\nuse policy and may be prosecuted under several sections of the\nCanadian Criminal Code.\n\nAny use of this system is subject to periodic monitoring as may\nbe required to assure the security of the system.\n\n" > /etc/motd
+chown root:root /etc/motd
+chmod 644 /etc/motd
+
+
+
+## A.3.0
+## Set sticky bit on all world-writable directories
+#
+echo "$(tput setab 2)Set sticky bit on all world-writable directories$(tput sgr 0)"
+echo -e "\e[1;31m##############################################################\e[0m"
+echo -e "\e[1;31m		NOTE any output from this command\e[0m"
+echo -e "\e[1;31m       Document them so we can fix them\e[0m"
+echo -e "\e[1;31m\e[0m"
+echo -e "\e[1;31m############################################################## \e[0m"
+find / -xdev -type d \( -perm -0002 -a ! -perm -1000 \) -print
+sleep 5
+
+
+echo "#######################"
+
+
+## A.3.1
+# Ensure the Default Umask is Set Correctly in login.defs
+# xccdf_org.ssgproject.content_rule_accounts_umask_login_defs
+echo "$(tput setab 2)Ensure the Default Umask is Set Correctly in login.defs$(tput sgr 0)"
+var_accounts_user_umask="077"
+grep -q UMASK /etc/login.defs && \
+  sed -i "s/UMASK.*/UMASK $var_accounts_user_umask/g" /etc/login.defs
+if ! [ $? -eq 0 ]; then
+    echo "UMASK $var_accounts_user_umask" >> /etc/login.defs
+fi
+
+## A.3.2
+## Disable various kernel modules
+echo "$(tput setab 2)Disable various kernel modules and Disabling Redundant Filesystems$(tput sgr 0)"
+touch /etc/modprobe.d/CIS.con
+cat <<EOF > /etc/modprobe.d/CIS.conf;
+install cramfs /bin/true
+install freevxfs /bin/true
+install jffs2 /bin/true
+install hfs /bin/true
+install hfsplus /bin/true
+install squashfs /bin/true
+install udf /bin/true
+install net-pf-31 /bin/true
+install bluetooth /bin/true
+install dccp /bin/true
+install sctp /bin/true
+install rds /bin/true
+install tipc /bin/true
+Options ipv6 disabled=1
+EOF
+
+function set_sysctl {
+        sysctl -q -n -w $1=$2
+        if grep --silent ^$1 /etc/sysctl.conf ; then
+                sed -i 's/^$1.*/$1 = $2/g' /etc/sysctl.conf
+        else
+                echo "" >> /etc/sysctl.conf
+                echo "$1 = $2" >> /etc/sysctl.conf
+        fi
+}
+
+## A.3.3
+# Enable Randomized Layout of Virtual Address Space
+# This seems to be the default, but the test fails if it's not explicit in the config.
+echo "$(tput setab 2)Enable Randomized Layout of Virtual Address Space $(tput sgr 0)"
+File=/etc/sysctl.conf
+if grep -q "kernel.randomize_va_space = 2" "$File"; ##note the space after the string you are searching for
+then
+echo -e "\e[1;32mChange already done.. skipping\e[0m"
+else
+echo -e "\e[1;33mAdding config to /etc/sysctl.conf...\e[0m"
+echo "kernel.randomize_va_space = 2" >>/etc/sysctl.conf
+fi
+
+
+
+## A.3.3
+## NTP is required for a number of compliance audits and is general good practice
+#
+echo "$(tput setab 2)NTP install and config $(tput sgr 0)"
+PACKAGE_NTP="ntp"
+    echo "Installing/Checking packages. Process may take a while..."
+        if rpm -q $PACKAGE_NTP | grep "not installed" > /dev/null #If package not yet installed
+           then
+            echo -e "\e[1;33mInstalling $PACKAGE_NTP...\e[0m"
+                yum install $PACKAGE_NTP -y > /dev/null #Install this package
+           fi
+    echo -e "\e[1;32m$PACKAGE_NTP checked/installed\e[0m"
+
+chkconfig ntpd on
+ntpdate ca.pool.ntp.org
+systemctl start ntpd
+
+#############
+## Fix NTP ##
+#############
+
+
+cat > /etc/ntp.conf <<-EOF
+driftfile /var/lib/ntp/drift
+restrict default kod nomodify notrap nopeer noquery
+restrict -6 default kod nomodify notrap nopeer noquery
+restrict 127.0.0.1
+restrict ::1
+server ca.pool.ntp.org
+includefile /etc/ntp/crypto/pw
+keys /etc/ntp/keys
+disable monitor
+EOF
+
+
+
+File=/etc/sysconfig/ntpd
+if grep -q 'ntp:ntp' "$File"; ##note the space after the string you are searching for
+then
+echo -e "\e[1;32mChange already done.. skipping\e[0m"
+else
+echo -e "\e[1;33mAdding config to $File...\e[0m"
+echo 'OPTIONS=\"-u ntp:ntp\"' >> $File
+fi
+
+systemctl restart ntpd
+systemctl enable ntpd
+
+## A.3.4
+## Disable Uncommon Protocols
+#
+echo "$(tput setab 2)Disable Uncommon Protocols$(tput sgr 0)"
+echo "install dccp /bin/false" > /etc/modprobe.d/dccp.conf
+echo "install sctp /bin/false" > /etc/modprobe.d/sctp.conf
+echo "install rds /bin/false" > /etc/modprobe.d/rds.conf
+echo "install tipc /bin/false" > /etc/modprobe.d/tipc.conf
+
+## A.3.5
+## Installing and Turning on rsyslog
+#
+echo "$(tput setab 2)Installing and Turning on rsyslog$(tput sgr 0)"
+PACKAGE_rsyslog="rsyslog"
+    echo "Installing/Checking packages. Process may take a while..."
+        if rpm -q $PACKAGE_rsyslog | grep "not installed" > /dev/null #If package not yet installed
+           then
+            echo "Installing $PACKAGE_rsyslog..."
+                yum install $PACKAGE_rsyslog -y > /dev/null #Install this package
+           fi
+    echo "$PACKAGE_rsyslog checked/installed"
+
+File_rsyslog=/etc/rsyslog.conf
+if grep -q '$FileCreateMode 0640' "$File_rsyslog"; ##note the space after the string you are searching for
+then
+echo -e "\e[1;32mChange already done.. skipping\e[0m"
+else
+echo -e "\e[1;33mAdding config to $File_rsyslog...\e[0m"
+echo '$FileCreateMode 0640' >> $File_rsyslog
+fi
+
+File_rsyslog1=/etc/rsyslog.conf
+if grep -q "^*.*[^I][^I]*@" "$File_rsyslog1"; ##note the space after the string you are searching for
+then
+echo -e "\e[1;32mChange already done.. skipping\e[0m"
+else
+echo -e "\e[1;33mAdding config to $File_rsyslog1...\e[0m"
+echo '*.* @@loghost.example.com' >> $File_rsyslog1
+fi
+
+systemctl enable rsyslog.service
+systemctl start rsyslog.service
+
+
+## A.3.6
+## Enable auditd service
+#
+echo "$(tput setab 2)Enable auditd service$(tput sgr 0)"
+systemctl enable auditd.service
+systemctl start auditd.service
+
+## A.3.7
+##Removal of Unrequired Services
+#
+echo "$(tput setab 2)Removal of Unrequired Services$(tput sgr 0)"
+array=( "xinetd"
+ "telnet-server"
+ "telnet"
+ "rsh-server"
+ "rsh"
+ "ypbind"
+ "ypserv"
+ "tftp-server"
+ "cronie-anacron"
+ "bind"
+ "vsftpd"
+ "httpd"
+ "dovecot"
+ "squid"
+ "net-snmpd"
+ "talk")
+
+for i in "${array[@]}"
+do
+          if rpm -q $i | grep "not installed" > /dev/null #If package not yet installed
+             then
+              echo "$i not installed"
+            else
+              echo -e "\e[1;33mRemoving $i...\e[0m"
+                  yum remove $i -y > /dev/null
+              echo -e "\e[1;33m$i has been removed\e[0m"
+             fi
+done
+
+## A.3.8
+##Bulk Enable / Disable Services
+#
+echo "$(tput setab 2)Bulk Enable / Disable Services$(tput sgr 0)"
+systemctl disable xinetd 2> /dev/null
+systemctl disable autofs 2> /dev/null
+systemctl disable rexec 2> /dev/null
+systemctl disable rsh 2> /dev/null
+systemctl disable rlogin 2> /dev/null
+systemctl disable ypbind 2> /dev/null
+systemctl disable tftp 2> /dev/null
+systemctl disable certmonger 2> /dev/null
+systemctl disable cgconfig 2> /dev/null
+systemctl disable cgred 2> /dev/null
+systemctl disable cpuspeed 2> /dev/null
+systemctl enable irqbalance 2> /dev/null
+systemctl disable kdump 2> /dev/null
+systemctl disable mdmonitor 2> /dev/null
+systemctl disable messagebus 2> /dev/null
+systemctl disable netconsole 2> /dev/null
+systemctl disable ntpdate 2> /dev/null
+systemctl disable oddjobd 2> /dev/null
+systemctl disable portreserve 2> /dev/null
+systemctl enable psacct 2> /dev/null
+systemctl disable qpidd 2> /dev/null
+systemctl disable quota_nld 2> /dev/null
+systemctl disable rdisc 2> /dev/null
+systemctl disable rhnsd 2> /dev/null
+systemctl disable rhsmcertd 2> /dev/null
+systemctl disable saslauthd 2> /dev/null
+systemctl disable smartd 2> /dev/null
+systemctl disable sysstat 2> /dev/null
+systemctl enable crond 2> /dev/null
+systemctl disable atd 2> /dev/null
+systemctl disable nfslock 2> /dev/null
+systemctl disable named 2> /dev/null
+systemctl disable httpd 2> /dev/null
+systemctl disable dovecot 2> /dev/null
+systemctl disable squid 2> /dev/null
+systemctl disable snmpd 2> /dev/null
+systemctl disable nfs 2> /dev/nullPACKAGE_ipTables="iptables"
+    echo "Installing/Checking packages. Process may take a while..."
+        if rpm -q $PACKAGE_ipTables | grep "not installed" > /dev/null #If package not yet installed
+           then
+            echo "Installing $PACKAGE_ipTables..."
+                yum install $PACKAGE_ipTables -y > /dev/null #Install this package
+           fi
+    echo "$PACKAGE_ipTables checked/installed"
+
+
+# Flush IPtables rules
+iptables -F
+# Ensure default deny firewall policy
+iptables -P INPUT DROP
+iptables -P OUTPUT DROP
+iptables -P FORWARD DROP
+# Ensure loopback traffic is configured
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A INPUT -s 127.0.0.0/8 -j DROP
+# Ensure outbound and established connections are configured
+iptables -A OUTPUT -p tcp -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -p udp -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -p icmp -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A INPUT -p tcp -m state --state ESTABLISHED -j ACCEPT
+iptables -A INPUT -p udp -m state --state ESTABLISHED -j ACCEPT
+iptables -A INPUT -p icmp -m state --state ESTABLISHED -j ACCEPT
+# Open inbound ssh(tcp port 22) connections
+iptables -A INPUT -p tcp --dport 22 -m state --state NEW -j ACCEPT
+iptables-save | sudo tee /etc/sysconfig/iptables
+systemctl status firewalld
+sleep .10 # Waits 0.10 second.
+systemctl disable avahi-daemon 2> /dev/null
+systemctl disable cups 2> /dev/null
+systemctl disable dhcpd 2> /dev/null
+systemctl disable slapd 2> /dev/null
+systemctl disable rpcbind 2> /dev/null
+systemctl disable vsftpd 2> /dev/null
+systemctl disable smb 2> /dev/null
+systemctl disable rsyncd 2> /dev/null
+systemctl disable ntalk 2> /dev/null
+
+## A.3.9
+##Prevent Log In to Accounts With Empty Password
+#
+echo "$(tput setab 2)Prevent Log In to Accounts With Empty Password$(tput sgr 0)"
+sed -i 's/\<nullok\>//g' /etc/pam.d/system-auth
+
+
+## A.4.0
+##Firewall Config
+#echo "$(tput setab 2)Install Iptables and Firewall Config.. (iptables) $(tput sgr 0)"
+#
+PACKAGE_ipTables="iptables"
+    echo "Installing/Checking packages. Process may take a while..."
+        if rpm -q $PACKAGE_ipTables | grep "not installed" > /dev/null #If package not yet installed
+           then
+            echo "Installing $PACKAGE_ipTables..."
+                yum install $PACKAGE_ipTables -y > /dev/null #Install this package
+           fi
+    echo "$PACKAGE_ipTables checked/installed"
+
+
+# Flush IPtables rules
+iptables -F
+# Ensure default deny firewall policy
+iptables -P INPUT DROP
+iptables -P OUTPUT DROP
+iptables -P FORWARD DROP
+# Ensure loopback traffic is configured
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A INPUT -s 127.0.0.0/8 -j DROP
+# Ensure outbound and established connections are configured
+iptables -A OUTPUT -p tcp -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -p udp -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -p icmp -m state --state NEW,ESTABLISHED -j ACCEPT
+iptables -A INPUT -p tcp -m state --state ESTABLISHED -j ACCEPT
+iptables -A INPUT -p udp -m state --state ESTABLISHED -j ACCEPT
+iptables -A INPUT -p icmp -m state --state ESTABLISHED -j ACCEPT
+# Open inbound ssh(tcp port 22) connections
+iptables -A INPUT -p tcp --dport 22 -m state --state NEW -j ACCEPT
+iptables-save | sudo tee /etc/sysconfig/iptables
+systemctl status firewalld
+sleep .10 # Waits 0.10 second.
+
+## A.4.1
+##Remove SETroubleshoot
+#
+echo "$(tput setab 2)Remove SETroubleshoot$(tput sgr 0)"
+PACKAGE_setroubleshoot="setroubleshoot"
+    echo "Removing/Checking packages. Process may take a while..."
+        if rpm -q $PACKAGE_setroubleshoot | grep "not installed" > /dev/null #If package not yet installed
+           then
+            echo "$PACKAGE_setroubleshoot not installed"
+        else
+          echo -e "\e[1;33mRemoving $PACKAGE_setroubleshoot...\e[0m"
+          yum remove $PACKAGE_setroubleshoot -y > /dev/null #remove this package
+          echo -e "\e[1;33m$PACKAGE_setroubleshoot has been removed\e[0m"
+           fi
+
+## A.4.2
+##Remove MCS Translation Service
+#
+echo "$(tput setab 2)Remove MCS Translation Service$(tput sgr 0)"
+PACKAGE_mcstrans="mcstrans"
+echo "Removing/Checking packages. Process may take a while..."
+    if rpm -q $PACKAGE_mcstrans | grep "not installed" > /dev/null #If package not yet installed
+       then
+        echo "$PACKAGE_mcstrans no installed"
+    else
+      echo -e "\e[1;33mRemoving $PACKAGE_mcstrans...\e[0m"
+      yum remove $PACKAGE_mcstrans -y > /dev/null #remove this package
+      echo -e "\e[1;33m$PACKAGE_mcstrans has been removed\e[0m"
+       fi
+
+
+## A.4.3
+##Set Root Ownership on GRUB
+#
+echo "$(tput setab 2)Set Root Ownership on GRUB$(tput sgr 0)"
+chown root:root /boot/grub2/grub.cfg
+chmod og-rwx /boot/grub2/grub.cfg
+
+
+## A.4.4
+##Disable Core Dumps
+#
+echo "$(tput setab 2)Disable Core Dumps$(tput sgr 0)"
+File_sysctl1=/etc/security/limits.conf
+string1="* hard core 0"
+  if grep -q "^$string1" "$File_sysctl1";
+    then
+      echo -e "\e[1;32mChange already done.. skipping\e[0m"
+      else
+      echo -e "\e[1;33mAdding config to $File_sysctl1...\e[0m"
+      echo $string1 >> $File_sysctl1
+fi
+
+File_sysctl2=/etc/sysctl.conf
+string2="fs.suid_dumpable = 0"
+    if grep -q "^$string2" "$File_sysctl2";
+      then
+      echo -e "\e[1;32mChange already done.. skipping\e[0m"
+      else
+      echo -e "\e[1;33mAdding config to $File_sysctl2...\e[0m"
+      echo $string2 >> $File_sysctl2
+fi
+
+
+## A.4.5
+##Set Daemon Umask
+#
+File_umask=/etc/sysconfig/init
+echo "$(tput setab 2)Set Daemon Umask$(tput sgr 0)"
+     if grep -q "umask 027" "$File_umask";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_umask...\e[0m"
+        echo 'umask 027' >> $File_umask
+fi
+
+## A.4.6
+##Network Configuration Hardening
+#
+echo "$(tput setab 2)Network Configuration Hardening$(tput sgr 0)"
+netarray=("net.ipv4.ip_forward=0"
+"net.ipv4.conf.all.send_redirects=0"
+"net.ipv4.conf.all.accept_source_route=0"
+"net.ipv4.conf.default.accept_source_route=0"
+"net.ipv4.conf.all.accept_redirects=0"
+"net.ipv4.conf.default.accept_redirects=0"
+"net.ipv4.conf.all.secure_redirects=0"
+"net.ipv4.conf.default.secure_redirects=0"
+"net.ipv4.conf.all.log_martians=1"
+"net.ipv4.conf.default.log_martians=1"
+"net.ipv4.icmp_echo_ignore_broadcasts=1"
+"net.ipv4.icmp_ignore_bogus_error_responses=1"
+"net.ipv4.conf.all.rp_filter=1"
+"net.ipv4.conf.default.rp_filter=1"
+"net.ipv4.tcp_syncookies=1"
+"net.ipv6.conf.all.accept_ra=0"
+"net.ipv6.conf.default.accept_ra=0"
+"net.ipv6.conf.all.accept_redirects=0"
+"net.ipv6.conf.default.accept_redirects=0")
+for i in "${netarray[@]}"
+do
+File_sysctl=/etc/sysctl.conf
+     if grep -q "^$i" "$File_sysctl";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_sysctl...\e[0m"
+        echo $i >> $File_sysctl
+fi
+done
+
+
+PACKAGE_tcp_wrappers="tcp_wrappers"
+    echo "Installing/Checking packages. Process may take a while..."
+        if rpm -q PACKAGE_tcp_wrappers | grep "not installed" > /dev/null #If package not yet installed
+           then
+            echo "Installing PACKAGE_tcp_wrappers..."
+                yum install PACKAGE_tcp_wrappers -y > /dev/null #Install this package
+           fi
+    echo "PACKAGE_tcp_wrappers checked/installed"
+
+## A.4.7
+##Configure PAM
+#
+echo "$(tput setab 2)Configure PAM$(tput sgr 0)"
+authconfig --passalgo=sha512 --update
+echo checking to make sure Password-Hashing is SHA512
+authconfig --test | grep hashing | grep sha512
+
+
+######################## Auditting ###############
+## A.5.0
+#
+systemctl start auditd
+systemctl enable auditd
+
+cat > /etc/audit/auditd.conf <<-EOF
+log_file = /var/log/audit/audit.log
+log_format = RAW
+log_group = root
+priority_boost = 4
+flush = INCREMENTAL
+freq = 20
+num_logs = 5
+disp_qos = lossy
+dispatcher = /sbin/audispd
+name_format = NONE
+##name = mydomain
+max_log_file = 100
+max_log_file_action = keep_logs
+space_left = 75
+space_left_action = email
+action_mail_acct = root
+admin_space_left = 50
+admin_space_left_action = halt
+disk_full_action = SUSPEND
+disk_error_action = SUSPEND
+##tcp_listen_port =
+tcp_listen_queue = 5
+tcp_max_per_addr = 1
+##tcp_client_ports = 1024-65535
+tcp_client_max_idle = 0
+enable_krb5 = no
+krb5_principal = auditd
+##krb5_key_file = /etc/audit/audit.key
+EOF
+
+## A.5.1
+##Enable Auditing for Processes that Start Prior to auditd
+#
+echo "$(tput setab 2)Enable Auditing for Processes that Start Prior to auditd$(tput sgr 0)"
+File_grub1=/etc/default/grub
+     if grep -q 'GRUB_CMDLINE_LINUX="audit=1"' "$File_grub1";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_grub1...\e[0m"
+        echo 'GRUB_CMDLINE_LINUX="audit=1"' >> $File_grub1
+	fi
+		grub2-mkconfig -o /boot/grub2/grub.cfg
+
+## A.5.2
+##Record Events that Modify Date and Time Information
+#
+echo "$(tput setab 2)Record Events that Modify Date and Time Information$(tput sgr 0)"
+audit_array1=("-a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change"
+"-a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change"
+"-a always,exit -F arch=b64 -S clock_settime -k time-change"
+"-a always,exit -F arch=b32 -S clock_settime -k time-change"
+"-w /etc/localtime -p wa -k time-change")
+for i in "${audit_array1[@]}"
+do
+File_audit1=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit1";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit1...\e[0m"
+        echo $i >> $File_audit1
+fi
+done
+
+## A.5.3
+##Record Events that Modify User/Group Information
+#
+echo "$(tput setab 2)Record Events that Modify User/Group Information$(tput sgr 0)"
+audit_array2=("-w /etc/group -p wa -k identity"
+"-w /etc/passwd -p wa -k identity"
+"-w /etc/gshadow -p wa -k identity"
+"-w /etc/shadow -p wa -k identity"
+"-w /etc/security/opasswd -p wa -k identity")
+for i in "${audit_array2[@]}"
+do
+File_audit2=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit2";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit2...\e[0m"
+        echo $i >> $File_audit2
+fi
+done
+
+## A.5.4
+##Record Events that Modify System's Network Environment
+#
+echo "$(tput setab 2)Record Events that Modify System's Network Environment$(tput sgr 0)"
+audit_array3=("-a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale"
+"-a always,exit -F arch=b32 -S sethostname -S setdomainname -k system-locale"
+"-w /etc/issue -p wa -k system-locale"
+"-w /etc/issue.net -p wa -k system-locale"
+"-w /etc/hosts -p wa -k system-locale"
+"-w /etc/sysconfig/network -p wa -k system-locale")
+for i in "${audit_array3[@]}"
+do
+File_audit3=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit3";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit3...\e[0m"
+        echo $i >> $File_audit3
+fi
+done
+
+## A.5.5
+##Record Events that Modify Mandatory Access Controls
+#
+echo "$(tput setab 2)Record Events that Modify Mandatory Access Controls$(tput sgr 0)"
+File_audit_1=/etc/audit/rules.d/audit.rules
+audit_add="-w /etc/selinux/ -p wa -k MAC-policy"
+     if grep -q "^$audit_add" "$File_audit_1";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit_1...\e[0m"
+        echo $audit_add >> $File_audit_1
+fi
+
+
+## A.5.6
+##Collect Login and Logout Events
+#
+echo "$(tput setab 2)Collect Login and Logout Events$(tput sgr 0)"
+audit_array4=("-w /var/run/faillog/ -p wa -k logins"
+"-w /var/log/lastlog -p wa -k logins"
+)
+for i in "${audit_array4[@]}"
+do
+File_audit4=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit4";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit4...\e[0m"
+        echo $i >> $File_audit4
+fi
+done
+
+## A.5.7
+##Collect Session Initiation Information
+#
+echo "$(tput setab 2)Collect Session Initiation Information$(tput sgr 0)"
+audit_array5=("-w /var/run/utmp -p wa -k session"
+"-w /var/log/wtmp -p wa -k session"
+"-w /var/log/btmp -p wa -k session"
+)
+for i in "${audit_array5[@]}"
+do
+File_audit5=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit5";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit5...\e[0m"
+        echo $i >> $File_audit5
+fi
+done
+
+
+## A.5.8
+##Collect Discretionary Access Control Permission Modification Events
+#
+echo "$(tput setab 2)Collect Discretionary Access Control Permission Modification Events$(tput sgr 0)"
+audit_array6=("-a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod"
+"-a always,exit -F arch=b32 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod"
+"-a always,exit -F arch=b64 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod"
+"-a always,exit -F arch=b32 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod"
+"-a always,exit -F arch=b64 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod"
+"-a always,exit -F arch=b32 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod"
+)
+for i in "${audit_array6[@]}"
+do
+File_audit6=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit6";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit6...\e[0m"
+        echo $i >> $File_audit6
+fi
+done
+
+## A.5.9
+##Collect Unsuccessful Unauthorised Access Attemps to Files
+#
+echo "$(tput setab 2)Collect Unsuccessful Unauthorised Access Attemps to Files $(tput sgr 0)"
+audit_array7=("-a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access"
+"-a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access"
+"-a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=4294967295 -k access"
+"-a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=4294967295 -k access"
+)
+for i in "${audit_array7[@]}"
+do
+File_audit7=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit7";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit7...\e[0m"
+        echo $i >> $File_audit7
+fi
+done
+## A.5.10
+##Collect Successful File System Mounts
+#
+echo "$(tput setab 2)Collect Successful File System Mounts $(tput sgr 0)"
+audit_array8=("-a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts"
+"-a always,exit -F arch=b32 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts"
+)
+for i in "${audit_array8[@]}"
+do
+File_audit8=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit8";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit8...\e[0m"
+        echo $i >> $File_audit8
+fi
+done
+
+
+## A.5.11
+##Collect File Deletion Events by User
+#
+echo "$(tput setab 2)Collect File Deletion Events by User $(tput sgr 0)"
+audit_array9=("-a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete"
+"-a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete"
+)
+for i in "${audit_array9[@]}"
+do
+File_audit9=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit9";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit9...\e[0m"
+        echo $i >> $File_audit9
+fi
+done
+
+
+## A.5.12
+##Collect Changes to System Administration Scope
+#
+echo "$(tput setab 2)Collect Changes to System Administration Scope $(tput sgr 0)"
+File_audit_2=/etc/audit/rules.d/audit.rules
+audit_add1="-w /etc/sudoers -p wa -k scope"
+     if grep -q "^$audit_add1" "$File_audit_2";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit_2...\e[0m"
+        echo $audit_add1 >> $File_audit_2
+fi
+
+
+## A.5.13
+##Collect System Administrator Actions
+#
+echo "$(tput setab 2)Collect System Administrator Actions $(tput sgr 0)"
+File_audit_3=/etc/audit/rules.d/audit.rules
+audit_add2="-w /var/log/sudo.log -p wa -k actions"
+     if grep -q "^audit_add2" "$File_audit_3";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit_3...\e[0m"
+        echo $audit_add2 >> $File_audit_3
+fi
+
+## A.5.14
+##Collect Kernel Module Loading and Unloading
+#
+echo "$(tput setab 2)Collect Kernel Module Loading and Unloading $(tput sgr 0)"
+audit_array10=("-w /sbin/insmod -p x -k modules"
+"-w /sbin/rmmod -p x -k modules"
+"-w /sbin/modprobe -p x -k modules"
+"-a always,exit -F arch=b64 -S init_module -S delete_module -k modules"
+)
+for i in "${audit_array10[@]}"
+do
+File_audit10=/etc/audit/rules.d/audit.rules
+     if grep -q "^$i" "$File_audit10";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit10...\e[0m"
+        echo $i >> $File_audit10
+fi
+done
+
+## A.5.14
+##Make the Audit Configuration Immutable
+#
+echo "$(tput setab 2)Make the Audit Configuration Immutable $(tput sgr 0)"
+File_audit_4=/etc/audit/rules.d/audit.rules
+audit_add3="-e 2"
+     if grep -q "^$audit_add3" "$File_audit_4";
+        then
+        echo -e "\e[1;32mChange already done.. skipping\e[0m"
+        else
+        echo -e "\e[1;33mAdding config to $File_audit_4...\e[0m"
+        echo $audit_add3 >> $File_audit_4
+fi
+
+
+pkill -HUP -P 1 auditd
+
+
+
+
+## A.6.0
+##install of AIDE
+#
+echo "$(tput setab 2)install of AIDE if not installed $(tput sgr 0)"
+
+PACKAGE_NAME="aide"
+    echo "Installing/Checking $PACKAGE_NAME. Process may take a while..."
+        if rpm -q $PACKAGE_NAME | grep "not installed" > /dev/null #If package not yet installed
+           then
+            echo "Installing $PACKAGE_NAME..."
+                yum install $PACKAGE_NAME -y > /dev/null #Install this package
+           fi
+    echo "$PACKAGE_NAME checked/installed"
+
+## A.6.1
+##Enusre bootloader password is set
+#
+echo "$(tput setab 2)Enusre bootloader password is set $(tput sgr 0)"
+grub2-mkpasswd-pbkdf2
+echo -n "Enter the Encrypted-password from above and press [ENTER]: "
+read name
+mv /etc/grub.d/01_users /etc/grub.d/01_users.backup
+echo "cat <<EOF"
+echo "set superusers="root""
+echo "password_pbkdf2 root $name" >>/etc/grub.d/01_users
+echo "EOF"
+
+## A.6.2
+##Enusre authentication required for single user mode
+#
+echo "$(tput setab 2)Enusre authentication required for single user mode $(tput sgr 0)"
+sed -ci.backup -e '/ExecStart=-*/d' /usr/lib/systemd/system/rescue.service
+sed -i '/Type=idle/i ExecStart=-/bin/sh -c "/sbin/sulogin; /usr/bin/systemctl --fail --no-block default"' /usr/lib/systemd/system/rescue.service
+sed -ci.backup -e '/ExecStart=-*/d' /usr/lib/systemd/system/emergency.service
+sed -i '/Type=idle/i ExecStart=-/bin/sh -c "/sbin/sulogin; /usr/bin/systemctl --fail --no-block default"' /usr/lib/systemd/system/emergency.service
+
+
+## A.6.3
+##Removing Prelink
+#
+echo "$(tput setab 2)Checking if Prelink is installed, removing if it is.. $(tput sgr 0)"
+PACKAGE_prelink="prelink"
+    echo "Removing/Checking packages. Process may take a while..."
+        if rpm -q $PACKAGE_prelink | grep "not installed" > /dev/null #If package not yet installed
+       then
+        echo "$PACKAGE_prelink not installed"
+    else
+      echo -e "\e[1;33mRemoving $PACKAGE_prelink...\e[0m"
+      yum remove $PACKAGE_prelink -y > /dev/null #remove this package
+      echo -e "\e[1;33m$PACKAGE_prelink has been removed\e[0m"
+       fi
+
+
+
+## A.6.4
+##Enusre SELinux is Enabled
+#
+echo "$(tput setab 2)Enusre SELinux is Enabled $(tput sgr 0)"
+echo -e "\e[1;31m##############################################################\e[0m"
+echo -e "\e[1;31mMAKE Sure SELinux status is Enabled\e[0m"
+echo -e "\e[1;31mand NOTE if it's Enforcing or not\e[0m"
+echo -e "\e[1;31m\e[0m"
+echo -e "\e[1;31m##############################################################\e[0m"
+sestatus
+
+## A.6.5 update login banner (/etc/issue)
+##
+#
+echo "$(tput setab 2)update remote login banner is updated (/etc/issue)$(tput sgr 0)"
+mv /etc/issue.net /etc/issue.netbackup
+touch /etc/issue.net
+echo -e "\n\nWARNING:\n\nThis computer system is restricted to authorized users only.\nIf you require access please contact the helpdesk or Server Team\n\n" > /etc/issue.net
+chown root:root /etc/issue.net
+chmod 644 /etc/issue.net
+
+## A.6.5 Ensuring X Windows system is not installed
+##
+#
+echo "$(tput setab 2)Ensuring X Windows system is not installed.$(tput sgr 0)"
+PACKAGE_Xwindows="xorg-x11*"
+    echo "Removing/Checking packages. Process may take a while..."
+        if rpm -q $PACKAGE_Xwindows | grep "not installed" > /dev/null #If package not yet installed
+       then
+        echo "$PACKAGE_Xwindows not installed"
+    else
+      echo -e "\e[1;33mRemoving $PACKAGE_Xwindows...\e[0m"
+      yum remove $PACKAGE_Xwindows -y > /dev/null #remove this package
+      echo -e "\e[1;33m$PACKAGE_Xwindows has been removed\e[0m"
+       fi
+
+##
+## A.6.6 Ensure permissions on all logfiles
+#
+echo "$(tput setab 2)Ensure permissions on all logfiles.$(tput sgr 0)"
+find /var/log -type f -exec chmod g-wx,o-rwx {} +
+
+
+##
+## A.6.7 Ensure permissions Crontab are configured
+#
+echo "$(tput setab 2)Ensure permissions Crontab are configured.$(tput sgr 0)"
+chown root:root /etc/crontab
+chmod og-rwx /etc/crontab
+chown root:root /etc/cron.hourly
+chmod og-rwx /etc/cron.hourly
+chown root:root /etc/cron.daily
+chmod og-rwx /etc/cron.daily
+chown root:root /etc/cron.weekly
+chmod og-rwx /etc/cron.weekly
+chown root:root /etc/cron.monthly
+chmod og-rwx /etc/cron.monthly
+chown root:root /etc/cron.d
+chmod og-rwx /etc/cron.d
+rm /etc/cron.deny
+rm /etc/at.deny
+touch /etc/cron.allow
+touch /etc/at.allow
+chmod og-rwx /etc/cron.allow
+chmod og-rwx /etc/at.allow
+chown root:root /etc/cron.allow
+chown root:root /etc/at.allow
+
+
+
+
+##
+##Identify the services that are listening on specific ports
+echo "$(tput setab 2)Identify the services that are listening on specific ports.$(tput sgr 0)"
+ss -tulpn
+sleep 3
+
+
+## Checking for Errors in the system log for last 10 entrys.
+echo "$(tput setab 2)Checking for Errors in the system log for last 10 entrys.$(tput sgr 0)"
+string=Error
+sed -n -e '10,$p'  /var/log/messages | \
+while read LINE
+do
+  if echo "$LINE" | grep "$string"
+  then
+    echo "String found on $HOSTNAME"
+  fi
+done
+
+
+
+
+###
+## Checking how many updates are needed
+#
+echo "Installing Yum updates now... "
+yum --security upgrade
+
+##  Last mandatory step - Reboot Server
+##
+#
+#clear
+echo This server is about to reboot!
+echo
+echo PLEASE CHECK the '/var/log' logs to ensure there are 'NO' System or Application ERRORS!  [OK]
+seconds=10
+(
+for i in $(seq $seconds -1 1); do
+    echo "$i seconds to shutdown...";
+    sleep 1;
+done;
+echo "Shutdown now!") &
+
+) | tee -a /var/log/Hardening/Hardening_$today.log
+#reboot
